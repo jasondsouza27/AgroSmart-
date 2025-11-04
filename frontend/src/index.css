@@ -1,0 +1,160 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* AgroSmart Design System - All colors, gradients, fonts, etc defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    --background: 120 20% 98%;
+    --foreground: 120 15% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 120 15% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 120 15% 15%;
+
+    /* Agricultural Green Theme */
+    --primary: 120 60% 25%;
+    --primary-foreground: 0 0% 98%;
+    --primary-glow: 120 55% 35%;
+
+    /* Water/Sky Blue */
+    --secondary: 200 85% 55%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 120 20% 96%;
+    --muted-foreground: 120 10% 45%;
+
+    /* Earth/Orange Accent */
+    --accent: 25 95% 55%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 120 15% 88%;
+    --input: 120 15% 94%;
+    --ring: 120 60% 25%;
+
+    /* Custom Agricultural Colors */
+    --success: 120 70% 40%;
+    --warning: 45 95% 55%;
+    --info: 200 85% 55%;
+    --soil: 30 45% 35%;
+    --water: 200 85% 65%;
+    --leaf: 120 50% 45%;
+
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-glow)));
+    --gradient-water: linear-gradient(180deg, hsl(var(--water)), hsl(var(--secondary)));
+    --gradient-earth: linear-gradient(45deg, hsl(var(--soil)), hsl(var(--accent)));
+    --gradient-success: linear-gradient(135deg, hsl(var(--success)), hsl(var(--leaf)));
+
+    /* Shadows */
+    --shadow-soft: 0 2px 8px hsl(var(--primary) / 0.1);
+    --shadow-medium: 0 4px 16px hsl(var(--primary) / 0.15);
+    --shadow-glow: 0 0 20px hsl(var(--primary-glow) / 0.3);
+
+    /* Animations */
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-spring: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 0 0% 98%;
+
+    --sidebar-foreground: 240 5.3% 26.1%;
+
+    --sidebar-primary: 240 5.9% 10%;
+
+    --sidebar-primary-foreground: 0 0% 98%;
+
+    --sidebar-accent: 240 4.8% 95.9%;
+
+    --sidebar-accent-foreground: 240 5.9% 10%;
+
+    --sidebar-border: 220 13% 91%;
+
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 120 15% 8%;
+    --foreground: 120 20% 95%;
+
+    --card: 120 15% 10%;
+    --card-foreground: 120 20% 95%;
+
+    --popover: 120 15% 10%;
+    --popover-foreground: 120 20% 95%;
+
+    /* Agricultural Green Theme - Enhanced for Dark */
+    --primary: 120 55% 40%;
+    --primary-foreground: 120 15% 8%;
+    --primary-glow: 120 60% 50%;
+
+    /* Water/Sky Blue - Darker */
+    --secondary: 200 75% 45%;
+    --secondary-foreground: 120 15% 8%;
+
+    --muted: 120 15% 12%;
+    --muted-foreground: 120 10% 65%;
+
+    /* Earth/Orange Accent - Warmer for dark */
+    --accent: 25 85% 55%;
+    --accent-foreground: 120 15% 8%;
+
+    --destructive: 0 75% 55%;
+    --destructive-foreground: 120 15% 8%;
+
+    --border: 120 15% 18%;
+    --input: 120 15% 15%;
+    --ring: 120 55% 40%;
+
+    /* Custom Agricultural Colors - Dark Mode */
+    --success: 120 65% 45%;
+    --warning: 45 85% 60%;
+    --info: 200 75% 55%;
+    --soil: 30 40% 45%;
+    --water: 200 75% 60%;
+    --leaf: 120 45% 50%;
+
+    /* Enhanced Gradients for Dark Mode */
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-glow)));
+    --gradient-water: linear-gradient(180deg, hsl(var(--water)), hsl(var(--secondary)));
+    --gradient-earth: linear-gradient(45deg, hsl(var(--soil)), hsl(var(--accent)));
+    --gradient-success: linear-gradient(135deg, hsl(var(--success)), hsl(var(--leaf)));
+
+    /* Enhanced Shadows for Dark Mode */
+    --shadow-soft: 0 2px 8px hsl(120 15% 5% / 0.3);
+    --shadow-medium: 0 4px 16px hsl(120 15% 5% / 0.4);
+    --shadow-glow: 0 0 20px hsl(var(--primary-glow) / 0.4);
+
+    --sidebar-background: 120 15% 6%;
+    --sidebar-foreground: 120 20% 90%;
+    --sidebar-primary: 120 55% 40%;
+    --sidebar-primary-foreground: 120 15% 8%;
+    --sidebar-accent: 120 15% 12%;
+    --sidebar-accent-foreground: 120 20% 90%;
+    --sidebar-border: 120 15% 15%;
+    --sidebar-ring: 120 55% 40%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    @apply dark;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
