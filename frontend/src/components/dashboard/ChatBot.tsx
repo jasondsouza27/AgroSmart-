@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { MessageCircle, Send, X, Bot, User } from "lucide-react";
+import { MessageCircle, Send, X, Bot, User, Loader2 } from "lucide-react";
 
 interface Message {
   id: string;
@@ -12,28 +12,33 @@ interface Message {
   timestamp: Date;
 }
 
-const botResponses = [
-  "Based on your soil moisture levels, I recommend increasing irrigation for 2 hours.",
-  "Your current weather conditions are perfect for planting tomatoes. Consider starting next week.",
-  "The nitrogen levels in your soil suggest adding organic fertilizer in the next 3 days.",
-  "Your pump efficiency is optimal. No maintenance required at this time.",
-  "Consider reducing watering frequency as humidity is above 70% today.",
-];
+interface ChatBotProps {
+  sensorContext?: {
+    temperature?: number;
+    humidity?: number;
+    soil_moisture?: number;
+    N?: number;
+    P?: number;
+    K?: number;
+    recommended_crop?: string;
+  };
+}
 
-export function ChatBot() {
+export function ChatBot({ sensorContext }: ChatBotProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "1",
-      text: "Hello! I'm your AgroSmart assistant. How can I help you optimize your irrigation today?",
+      text: "Hello! I'm your AgroSmart assistant powered by AI. How can I help you optimize your farming today?",
       sender: "bot",
       timestamp: new Date(),
     },
   ]);
   const [inputValue, setInputValue] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSend = () => {
-    if (!inputValue.trim()) return;
+  const handleSend = async () => {
+    if (!inputValue.trim() || isLoading) return;
 
     // Add user message
     const userMessage: Message = {
@@ -44,18 +49,46 @@ export function ChatBot() {
     };
 
     setMessages(prev => [...prev, userMessage]);
+    const currentInput = inputValue;
     setInputValue("");
+    setIsLoading(true);
 
-    // Simulate bot response
-    setTimeout(() => {
+    try {
+      // Call backend API with context
+      const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+      const response = await fetch(`${API_BASE_URL}/api/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: currentInput,
+          context: sensorContext || {},
+        }),
+      });
+
+      const data = await response.json();
+
       const botMessage: Message = {
         id: (Date.now() + 1).toString(),
-        text: botResponses[Math.floor(Math.random() * botResponses.length)],
+        text: data.response || "I apologize, but I couldn't generate a response. Please try again.",
         sender: "bot",
         timestamp: new Date(),
       };
+
       setMessages(prev => [...prev, botMessage]);
-    }, 1000);
+    } catch (error) {
+      console.error('Chat API error:', error);
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        text: "⚠️ I'm having trouble connecting. Please make sure the backend server is running and Ollama is installed.",
+        sender: "bot",
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -77,8 +110,8 @@ export function ChatBot() {
   }
 
   return (
-    <Card className="fixed bottom-4 right-4 w-80 h-96 shadow-medium z-50">
-      <CardHeader className="pb-3">
+    <Card className="fixed bottom-4 right-4 w-80 h-[500px] shadow-medium z-50 flex flex-col">
+      <CardHeader className="pb-3 flex-shrink-0">
         <CardTitle className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Bot className="h-5 w-5 text-success" />
@@ -97,7 +130,7 @@ export function ChatBot() {
         </CardTitle>
       </CardHeader>
 
-      <CardContent className="flex flex-col h-full pb-3">
+      <CardContent className="flex-1 flex flex-col overflow-hidden pb-3">
         <div className="flex-1 overflow-y-auto space-y-3 mb-3">
           {messages.map((message) => (
             <div
@@ -127,16 +160,26 @@ export function ChatBot() {
           ))}
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-shrink-0">
           <Input
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyPress={handleKeyPress}
             placeholder="Ask about your crops..."
             className="text-sm"
+            disabled={isLoading}
           />
-          <Button onClick={handleSend} size="sm" className="bg-gradient-primary">
-            <Send className="h-4 w-4" />
+          <Button 
+            onClick={handleSend} 
+            size="sm" 
+            className="bg-gradient-primary"
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
           </Button>
         </div>
       </CardContent>

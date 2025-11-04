@@ -5,6 +5,7 @@ from flask_cors import CORS
 from datetime import datetime
 import json
 import os
+import requests
 
 # --- 1. Initialize the Flask App ---
 # Flask is a lightweight framework for building web applications and APIs in Python.
@@ -193,6 +194,80 @@ def get_crop_recommendation():
             'K': latest_sensor_data.get('K')
         }
     })
+
+@app.route('/api/chat', methods=['POST'])
+def chat():
+    """
+    Handle chatbot conversations using local Ollama LLM.
+    Expects: {"message": "user query", "context": {...sensor data...}}
+    Returns: {"response": "LLM answer"}
+    """
+    try:
+        data = request.get_json()
+        user_message = data.get('message', '')
+        context = data.get('context', {})
+        
+        if not user_message:
+            return jsonify({'error': 'No message provided'}), 400
+        
+        # Build system prompt with agricultural context
+        system_prompt = f"""You are AgroSmart Assistant, an expert agricultural advisor helping farmers optimize their crop management.
+
+Current Farm Conditions:
+- Temperature: {context.get('temperature', 'N/A')}°C
+- Humidity: {context.get('humidity', 'N/A')}%
+- Soil Moisture: {context.get('soil_moisture', 'N/A')}%
+- NPK Values: N={context.get('N', 'N/A')}, P={context.get('P', 'N/A')}, K={context.get('K', 'N/A')}
+- Recommended Crop: {context.get('recommended_crop', 'Analyzing...')}
+
+Provide practical, actionable advice based on these conditions. Be concise, friendly, and focus on helping the farmer succeed."""
+
+        # Call LM Studio API (default runs on localhost:1234)
+        # LM Studio uses OpenAI-compatible API format
+        lmstudio_url = "http://localhost:1234/v1/chat/completions"
+        lmstudio_payload = {
+            "model": "local-model",  # LM Studio uses whatever model is loaded
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message}
+            ],
+            "temperature": 0.7,
+            "max_tokens": 200,
+            "stream": False
+        }
+        
+        # Try to call LM Studio
+        try:
+            response = requests.post(lmstudio_url, json=lmstudio_payload, timeout=30)
+            
+            if response.status_code == 200:
+                lmstudio_response = response.json()
+                bot_message = lmstudio_response['choices'][0]['message']['content']
+                return jsonify({'response': bot_message.strip()})
+            else:
+                return jsonify({
+                    'response': "I'm having trouble connecting to the AI assistant. Please make sure LM Studio is running with a model loaded.",
+                    'error': f"LM Studio returned status code {response.status_code}"
+                }), 500
+                
+        except requests.exceptions.ConnectionError:
+            return jsonify({
+                'response': "⚠️ I couldn't connect to the local AI assistant. Please install and start LM Studio:\n\n1. Download from https://lmstudio.ai\n2. Load LLaMA 2 7B model (or any model you prefer)\n3. Start the local server (click the ↔ icon in LM Studio)\n4. Make sure it's running on port 1234\n\nLM Studio makes running local AI super easy with a GUI!",
+                'error': 'LM Studio not running'
+            }), 503
+            
+        except requests.exceptions.Timeout:
+            return jsonify({
+                'response': "The AI assistant is taking too long to respond. Please try again.",
+                'error': 'Request timeout'
+            }), 504
+            
+    except Exception as e:
+        print(f"Error in chat endpoint: {str(e)}")
+        return jsonify({
+            'response': "I encountered an unexpected error. Please try again.",
+            'error': str(e)
+        }), 500
 
 # --- 5. Run the Server ---
 # This starts the server when you run 'python prediction_server.py'

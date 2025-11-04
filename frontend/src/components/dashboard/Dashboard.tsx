@@ -340,7 +340,17 @@ export function Dashboard() {
       </div>
 
       {/* Floating Chatbot */}
-      <ChatBot />
+      <ChatBot 
+        sensorContext={{
+          temperature: sensorData.temperature,
+          humidity: sensorData.humidity,
+          soil_moisture: sensorData.soil_moisture,
+          N: sensorData.N,
+          P: sensorData.P,
+          K: sensorData.K,
+          recommended_crop: recommendedCrop || undefined,
+        }}
+      />
 
       {/* Sensor Detail Modal */}
       {selectedSensor && (
