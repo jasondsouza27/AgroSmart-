@@ -6,6 +6,10 @@ from datetime import datetime
 import json
 import os
 import requests
+import time
+import serial
+import serial.tools.list_ports
+import threading
 
 # --- 1. Initialize the Flask App ---
 # Flask is a lightweight framework for building web applications and APIs in Python.
@@ -25,6 +29,15 @@ latest_sensor_data = {
     'timestamp': None
 }
 
+# Weather API configuration
+WEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY', '3d0f470cb64243c0b4494926250411')  # WeatherAPI key
+DEFAULT_CITY = "Mumbai"  # Mumbai, India
+weather_cache = {
+    'data': None,
+    'last_updated': None
+}
+WEATHER_CACHE_DURATION = 3600  # 1 hour in seconds
+
 # --- 2. Load the Trained Model ---
 # This line loads the model you trained and saved earlier.
 # The script expects 'crop_recommendation_model.joblib' to be in the same folder.
@@ -38,6 +51,191 @@ except FileNotFoundError:
 except Exception as e:
     print(f"An error occurred while loading the model: {e}")
     model = None
+
+def fetch_weather_data(city=DEFAULT_CITY):
+    """
+    Fetches weather data from WeatherAPI.com
+    Falls back to mock data if API key is not set or request fails
+    """
+    global weather_cache
+    
+    # Check if cache is still valid (less than 1 hour old)
+    if weather_cache['data'] and weather_cache['last_updated']:
+        time_since_update = time.time() - weather_cache['last_updated']
+        if time_since_update < WEATHER_CACHE_DURATION:
+            print(f"Using cached weather data (updated {int(time_since_update/60)} minutes ago)")
+            return weather_cache['data']
+    
+    # If no API key, return mock data
+    if not WEATHER_API_KEY:
+        print("No WeatherAPI key found. Using mock weather data.")
+        mock_data = {
+            'condition': 'sunny',
+            'temperature': 28,
+            'humidity': 65,
+            'windSpeed': 12,
+            'forecast': 'Sunny with occasional clouds. Perfect conditions for irrigation.',
+            'lastUpdated': datetime.now().isoformat()
+        }
+        weather_cache['data'] = mock_data
+        weather_cache['last_updated'] = time.time()
+        return mock_data
+    
+    try:
+        # Fetch from WeatherAPI.com
+        url = f"http://api.weatherapi.com/v1/current.json?key={WEATHER_API_KEY}&q={city}&aqi=no"
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        
+        # Map weather condition to our simple categories
+        weather_text = data['current']['condition']['text'].lower()
+        if 'rain' in weather_text or 'drizzle' in weather_text or 'shower' in weather_text:
+            condition = 'rainy'
+        elif 'cloud' in weather_text or 'overcast' in weather_text:
+            condition = 'cloudy'
+        else:
+            condition = 'sunny'
+        
+        weather_data = {
+            'condition': condition,
+            'temperature': round(data['current']['temp_c'], 1),
+            'humidity': data['current']['humidity'],
+            'windSpeed': round(data['current']['wind_kph'], 1),
+            'forecast': data['current']['condition']['text'],
+            'lastUpdated': datetime.now().isoformat()
+        }
+        
+        # Update cache
+        weather_cache['data'] = weather_data
+        weather_cache['last_updated'] = time.time()
+        
+        print(f"Weather data fetched successfully for {city}: {weather_data['temperature']}°C, {weather_data['forecast']}")
+        return weather_data
+        
+    except Exception as e:
+        print(f"Error fetching weather data: {e}")
+        # Return mock data as fallback
+        mock_data = {
+            'condition': 'sunny',
+            'temperature': 28,
+            'humidity': 65,
+            'windSpeed': 12,
+            'forecast': 'Weather data unavailable. Using default values.',
+            'lastUpdated': datetime.now().isoformat()
+        }
+        return mock_data
+
+# --- Serial Communication with ESP32 ---
+ser = None  # Global serial connection object
+
+def find_esp32_port():
+    """
+    Automatically detect the ESP32's COM port by looking for Silicon Labs CP210x
+    """
+    ports = serial.tools.list_ports.comports()
+    for port in ports:
+        if 'CP210' in port.description or 'Silicon Labs' in port.description:
+            print(f"Found ESP32 on port: {port.device}")
+            return port.device
+        # Also check for CH340 which is another common USB-to-serial chip
+        if 'CH340' in port.description:
+            print(f"Found ESP32 on port: {port.device}")
+            return port.device
+    return None
+
+def connect_to_esp32():
+    """
+    Establish serial connection to ESP32
+    """
+    global ser
+    port = find_esp32_port()
+    
+    if port is None:
+        print("ESP32 not found. Please check USB connection.")
+        return False
+    
+    try:
+        ser = serial.Serial(port, 115200, timeout=1)
+        print(f"Connected to ESP32 on {port}")
+        return True
+    except Exception as e:
+        print(f"Error connecting to ESP32: {e}")
+        return False
+
+def read_sensor_data():
+    """
+    Continuously read sensor data from ESP32 in a separate thread
+    """
+    global latest_sensor_data, sensor_history, ser
+    
+    while True:
+        try:
+            if ser and ser.in_waiting > 0:
+                line = ser.readline().decode('utf-8').strip()
+                
+                # Try to parse as JSON
+                try:
+                    data = json.loads(line)
+                    
+                    # Update latest sensor data
+                    latest_sensor_data = {
+                        'temperature': data.get('temperature', 0),
+                        'humidity': data.get('humidity', 0),
+                        'soil_moisture': data.get('soil_moisture', 0),
+                        'N': data.get('N', 0),
+                        'P': data.get('P', 0),
+                        'K': data.get('K', 0),
+                        'rainfall': data.get('rainfall', 0),
+                        'pump_command': data.get('pump_command', 'PUMP_OFF'),  # Get pump status from ESP32
+                        'timestamp': datetime.now().isoformat()
+                    }
+                    
+                    # Run ML model to get crop recommendation
+                    if model is not None:
+                        try:
+                            prediction_input = {
+                                'N': latest_sensor_data['N'],
+                                'P': latest_sensor_data['P'],
+                                'K': latest_sensor_data['K'],
+                                'temperature': latest_sensor_data['temperature'],
+                                'humidity': latest_sensor_data['humidity'],
+                                'rainfall': latest_sensor_data['rainfall'],
+                                'soil_moisture': latest_sensor_data['soil_moisture']
+                            }
+                            crop_prediction, pump_cmd = make_prediction(prediction_input)
+                            latest_sensor_data['recommended_crop'] = crop_prediction
+                            # Note: Pump command from make_prediction is for logging only
+                            # Actual pump control is handled by ESP32
+                            print(f"Prediction successful. Recommended Crop: {crop_prediction}, ESP32 Pump: {latest_sensor_data['pump_command']}")
+                        except Exception as pred_error:
+                            print(f"Error making crop prediction: {pred_error}")
+                            latest_sensor_data['recommended_crop'] = 'Error'
+                    
+                    # Add to history
+                    sensor_history.append(latest_sensor_data.copy())
+                    
+                    # Keep only last 100 readings
+                    if len(sensor_history) > 100:
+                        sensor_history.pop(0)
+                    
+                    print(f"Received sensor data: Temp={latest_sensor_data['temperature']}°C, "
+                          f"Humidity={latest_sensor_data['humidity']}%, "
+                          f"Soil Moisture={latest_sensor_data['soil_moisture']}%, "
+                          f"Pump={latest_sensor_data['pump_command']}")
+                    
+                except json.JSONDecodeError:
+                    # If not JSON, just print the raw line
+                    print(f"ESP32: {line}")
+                    
+        except Exception as e:
+            print(f"Error reading sensor data: {e}")
+            # Try to reconnect
+            time.sleep(5)
+            if not connect_to_esp32():
+                print("Failed to reconnect to ESP32")
+        
+        time.sleep(0.1)  # Small delay to prevent CPU hogging
 
 # --- 3. Define the Prediction Logic ---
 def make_prediction(data):
@@ -58,9 +256,7 @@ def make_prediction(data):
         crop_prediction = model.predict(df)[0]
 
         # --- Simple Pump Control Logic ---
-        # This is a basic rule-based system.
-        # You can create more complex rules for different crops.
-        # For now, we use a universal threshold for soil moisture.
+        # Automatic control based on soil moisture
         pump_command = "PUMP_OFF"
         soil_moisture = data.get('soil_moisture', 100) # Use a default if not provided
         
@@ -68,7 +264,8 @@ def make_prediction(data):
         if soil_moisture < 40:
             pump_command = "PUMP_ON"
         
-        print(f"Prediction successful. Recommended Crop: {crop_prediction}, Pump Command: {pump_command}")
+        # Note: This pump_command is for reference only
+        # Actual pump control is handled by ESP32 automatic mode
         return crop_prediction, pump_command
 
     except Exception as e:
@@ -160,12 +357,46 @@ def get_pump_status():
 @app.route('/api/pump/control', methods=['POST'])
 def control_pump():
     """
-    Manual pump control endpoint (optional)
+    Manual pump control endpoint
+    Sends PUMP_ON or PUMP_OFF commands to ESP32
     """
+    global ser
+    
     data = request.get_json()
     command = data.get('command', 'PUMP_OFF')
-    # In a real system, you'd send this to the ESP32
-    return jsonify({'status': 'success', 'command': command})
+    mode = data.get('mode', 'manual')
+    
+    # Send command to ESP32 via serial
+    if ser and ser.is_open:
+        try:
+            ser.write(f"{command}\n".encode())
+            print(f"Sent {command} command to ESP32 (mode: {mode})")
+            
+            # Wait briefly for acknowledgment
+            time.sleep(0.1)
+            response_lines = []
+            while ser.in_waiting > 0:
+                line = ser.readline().decode('utf-8').strip()
+                response_lines.append(line)
+                if "ACK:" in line:
+                    print(f"ESP32 response: {line}")
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'Pump command {command} sent successfully',
+                'mode': mode
+            })
+        except Exception as e:
+            print(f"Error sending pump command: {e}")
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to send command: {str(e)}'
+            }), 500
+    else:
+        return jsonify({
+            'status': 'error',
+            'message': 'ESP32 not connected'
+        }), 503
 
 @app.route('/api/crop/recommendation', methods=['GET'])
 def get_crop_recommendation():
@@ -194,6 +425,16 @@ def get_crop_recommendation():
             'K': latest_sensor_data.get('K')
         }
     })
+
+@app.route('/api/weather', methods=['GET'])
+def get_weather():
+    """
+    Returns current weather data
+    Refreshed automatically every hour
+    """
+    city = request.args.get('city', DEFAULT_CITY)
+    weather_data = fetch_weather_data(city)
+    return jsonify(weather_data)
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
@@ -272,6 +513,16 @@ Provide practical, actionable advice based on these conditions. Be concise, frie
 # --- 5. Run the Server ---
 # This starts the server when you run 'python prediction_server.py'
 if __name__ == '__main__':
+    # Connect to ESP32 and start reading sensor data
+    print("Connecting to ESP32...")
+    if connect_to_esp32():
+        # Start sensor reading in a separate thread
+        sensor_thread = threading.Thread(target=read_sensor_data, daemon=True)
+        sensor_thread.start()
+        print("ESP32 sensor reading thread started")
+    else:
+        print("Warning: ESP32 not connected. Using mock data.")
+    
     # '0.0.0.0' makes the server accessible from any device on your local network (like your ESP32).
     # 'port=5000' is the standard port for Flask apps.
     print("Starting Flask server...")

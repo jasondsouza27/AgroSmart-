@@ -13,6 +13,7 @@ interface PumpControlProps {
   pressure: number;
   flowRate: number;
   onToggle: (active: boolean) => void;
+  onAutoModeToggle?: (enabled: boolean) => Promise<void>;
 }
 
 export function PumpControl({ 
@@ -20,22 +21,38 @@ export function PumpControl({
   waterLevel, 
   pressure, 
   flowRate, 
-  onToggle 
+  onToggle,
+  onAutoModeToggle
 }: PumpControlProps) {
   const [autoMode, setAutoMode] = useState(true);
   
-  const handleManualToggle = () => {
+  const handleManualToggle = async () => {
+    // If in auto mode, switch to manual mode first
     if (autoMode) {
-      toast.warning("Switch to manual mode first to control pump manually");
-      return;
+      setAutoMode(false);
+      toast.info("Switched to manual mode");
     }
+    
+    // Then toggle the pump
     onToggle(!isActive);
     toast.success(isActive ? "Pump stopped" : "Pump started");
   };
   
-  const handleAutoModeToggle = (enabled: boolean) => {
+  const handleAutoModeToggle = async (enabled: boolean) => {
     setAutoMode(enabled);
-    toast.info(enabled ? "Auto mode enabled" : "Manual mode enabled");
+    
+    if (enabled && onAutoModeToggle) {
+      try {
+        await onAutoModeToggle(enabled);
+      } catch (error) {
+        console.error("Error toggling auto mode:", error);
+        toast.error("Failed to enable auto mode");
+        // Revert the toggle state
+        setAutoMode(!enabled);
+      }
+    } else {
+      toast.info("Manual mode enabled - use buttons to control pump");
+    }
   };
   
   return (
@@ -72,7 +89,6 @@ export function PumpControl({
         <div className="space-y-3">
           <Button 
             onClick={handleManualToggle}
-            disabled={autoMode}
             className={`w-full ${isActive ? 'bg-destructive hover:bg-destructive/90' : 'bg-gradient-primary'}`}
             size="lg"
           >
@@ -82,7 +98,7 @@ export function PumpControl({
           
           {autoMode && (
             <div className="text-xs text-muted-foreground text-center">
-              Pump is controlled automatically based on soil moisture
+              Click button to switch to manual control
             </div>
           )}
         </div>

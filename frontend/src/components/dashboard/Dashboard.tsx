@@ -7,19 +7,11 @@ import { PumpControl } from "./PumpControl";
 import { DataChart } from "./DataChart";
 import { ChatBot } from "./ChatBot";
 import { SensorDetailModal } from "./SensorDetailModal";
-import { Thermometer, Droplets, Gauge, Leaf, History } from "lucide-react";
+import { Thermometer, Droplets, Gauge, Leaf, History, LogOut } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { getCurrentSensors, getSensorHistory, getPumpStatus, getCropRecommendation, type SensorData } from "@/lib/api";
+import { useAuth } from "@/lib/AuthContext";
+import { getCurrentSensors, getSensorHistory, getPumpStatus, getCropRecommendation, getWeather, controlPump, type SensorData, type WeatherData } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
-
-// Mock weather data (can be replaced with real API later)
-const mockWeather = {
-  condition: "sunny" as const,
-  temperature: 28,
-  humidity: 65,
-  windSpeed: 12,
-  forecast: "Sunny with occasional clouds. Perfect conditions for irrigation.",
-};
 
 // Mock crops data (will be replaced with API prediction results)
 const mockCrops = [
@@ -48,6 +40,7 @@ const mockCrops = [
 
 export function Dashboard() {
   const navigate = useNavigate();
+  const { logout, currentUser } = useAuth();
   const { toast } = useToast();
   const [sensorData, setSensorData] = useState<SensorData>({
     temperature: 0,
@@ -63,6 +56,14 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [recommendedCrop, setRecommendedCrop] = useState<string | null>(null);
   const [crops, setCrops] = useState<any[]>([]);
+  const [weather, setWeather] = useState<WeatherData>({
+    condition: 'sunny',
+    temperature: 28,
+    humidity: 65,
+    windSpeed: 12,
+    forecast: 'Loading weather data...',
+    lastUpdated: new Date().toISOString(),
+  });
   const [selectedSensor, setSelectedSensor] = useState<{
     type: string;
     value: number;
@@ -113,6 +114,46 @@ export function Dashboard() {
     }
   };
 
+  // Handle manual pump toggle
+  const handlePumpToggle = async (active: boolean) => {
+    try {
+      const command = active ? 'PUMP_ON' : 'PUMP_OFF';
+      await controlPump(command, 'manual');
+      setPumpActive(active);
+      toast({
+        title: "Pump Control",
+        description: active ? 'Pump started manually' : 'Pump stopped manually',
+      });
+    } catch (error) {
+      console.error('Error controlling pump:', error);
+      toast({
+        title: "Error",
+        description: 'Failed to control pump',
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Handle auto mode toggle
+  const handleAutoModeToggle = async (enabled: boolean) => {
+    try {
+      const response = await controlPump('AUTO_MODE', 'auto');
+      console.log('Auto mode response:', response);
+      toast({
+        title: "Auto Mode Enabled",
+        description: 'Pump will control automatically based on soil moisture',
+      });
+    } catch (error) {
+      console.error('Error enabling auto mode:', error);
+      toast({
+        title: "Error",
+        description: 'Failed to enable auto mode',
+        variant: "destructive",
+      });
+      throw error; // Re-throw so PumpControl can revert the toggle
+    }
+  };
+
   // Fetch historical data for charts
   const fetchHistoricalData = async () => {
     try {
@@ -139,6 +180,8 @@ export function Dashboard() {
   const fetchCropRecommendation = async () => {
     try {
       const recommendation = await getCropRecommendation();
+      console.log('Received crop recommendation:', recommendation);
+      
       if (recommendation.recommended_crop && recommendation.recommended_crop !== 'Unknown') {
         setRecommendedCrop(recommendation.recommended_crop);
         
@@ -147,10 +190,11 @@ export function Dashboard() {
           name: recommendation.recommended_crop,
           suitability: "excellent" as const,
           expectedYield: "Based on current conditions",
-          waterRequirement: recommendation.current_conditions.soil_moisture < 40 ? "high" as const : 
-                           recommendation.current_conditions.soil_moisture > 60 ? "low" as const : "medium" as const,
+          waterRequirement: recommendation.current_conditions?.soil_moisture < 40 ? "high" as const : 
+                           recommendation.current_conditions?.soil_moisture > 60 ? "low" as const : "medium" as const,
           plantingTime: "Now",
         }];
+        console.log('Setting crops data:', cropData);
         setCrops(cropData);
         
         toast({
@@ -158,6 +202,7 @@ export function Dashboard() {
           description: `AI recommends: ${recommendation.recommended_crop}`,
         });
       } else {
+        console.log('No valid recommendation, showing placeholder');
         // No recommendation yet, show placeholder
         setCrops([{
           name: "Waiting for sensor data...",
@@ -172,11 +217,23 @@ export function Dashboard() {
     }
   };
 
+  // Fetch weather data from API
+  const fetchWeatherData = async () => {
+    try {
+      const weatherData = await getWeather();
+      setWeather(weatherData);
+      console.log('Weather data updated:', weatherData);
+    } catch (error) {
+      console.error('Error fetching weather data:', error);
+    }
+  };
+
   // Initial data fetch
   useEffect(() => {
     fetchSensorData();
     fetchHistoricalData();
     fetchCropRecommendation();
+    fetchWeatherData();  // Fetch weather on mount
   }, []);
 
   // Real-time data updates every 5 seconds
@@ -188,6 +245,15 @@ export function Dashboard() {
     }, 5000);
 
     return () => clearInterval(interval);
+  }, []);
+
+  // Weather data updates every 1 hour (3600000 ms)
+  useEffect(() => {
+    const weatherInterval = setInterval(() => {
+      fetchWeatherData();
+    }, 3600000); // 1 hour
+
+    return () => clearInterval(weatherInterval);
   }, []);
 
   const getSoilMoistureStatus = (moisture: number) => {
@@ -224,16 +290,47 @@ export function Dashboard() {
           <p className="text-muted-foreground text-lg">
             Intelligent Irrigation System - Monitor, Control & Optimize
           </p>
+          {currentUser && (
+            <p className="text-sm text-muted-foreground mt-1">
+              Welcome, {currentUser.displayName || currentUser.email}
+            </p>
+          )}
         </div>
         
-        <Button
-          onClick={() => navigate("/historical-logs")}
-          variant="outline"
-          className="border-primary/20 hover:bg-primary/10"
-        >
-          <History className="h-4 w-4 mr-2" />
-          Historical Logs
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            onClick={() => navigate("/historical-logs")}
+            variant="outline"
+            className="border-primary/20 hover:bg-primary/10"
+          >
+            <History className="h-4 w-4 mr-2" />
+            Historical Logs
+          </Button>
+          
+          <Button
+            onClick={async () => {
+              try {
+                await logout();
+                toast({
+                  title: "Logged out",
+                  description: "You have been successfully logged out",
+                });
+                navigate("/login");
+              } catch (error) {
+                toast({
+                  title: "Error",
+                  description: "Failed to log out",
+                  variant: "destructive",
+                });
+              }
+            }}
+            variant="outline"
+            className="border-red-200 hover:bg-red-50 text-red-600"
+          >
+            <LogOut className="h-4 w-4 mr-2" />
+            Logout
+          </Button>
+        </div>
       </div>
 
       {/* Real-time Sensor Cards */}
@@ -326,7 +423,7 @@ export function Dashboard() {
         {/* Right Column */}
         <div className="space-y-6">
           {/* Weather Card */}
-          <WeatherCard weather={mockWeather} />
+          <WeatherCard weather={weather} />
           
           {/* Pump Control */}
           <PumpControl
@@ -334,7 +431,8 @@ export function Dashboard() {
             waterLevel={85}
             pressure={12}
             flowRate={15}
-            onToggle={setPumpActive}
+            onToggle={handlePumpToggle}
+            onAutoModeToggle={handleAutoModeToggle}
           />
         </div>
       </div>
